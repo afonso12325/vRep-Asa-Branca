@@ -23,16 +23,16 @@ extern "C" {
   #include "remoteApi/extApi.h"
 }
 #include "serial.h"
-#include <iostream> 
+#include <iostream>
 #include <stdio.h> 
 #include <string> 
 #include <errno.h> 
 #include <fcntl.h> 
 #include <stdlib.h> 
-#include <string.h> 
+#include <string.h>
 #include <termios.h> 
 #include <unistd.h>
-  using namespace std;
+using namespace std;
 
 int main(int argc, char ** argv) {
   char * portname = "/dev/ttyACM0";
@@ -115,7 +115,10 @@ int main(int argc, char ** argv) {
   float v0 = 2;
   char buf[50];
   int clientID = simxStart((simxChar * ) serverIP.c_str(), serverPort, true, true, 2000, 5);
-
+  bool ft = true;
+  int rdlen = 0;
+  unsigned char bufserial[80];
+  bool canwrite = true;
   if (clientID != -1) {
     cout << "Servidor conectado!" << std::endl;
 
@@ -145,58 +148,65 @@ int main(int argc, char ** argv) {
     }
 
     // desvio e velocidade do robô
+        printf("tentouwhile\n");
+
     while (simxGetConnectionId(clientID) != -1) // enquanto a simulação estiver ativa
     {
-      // handle serial
-      unsigned char buf[80];
-      int rdlen;
+      for (int i = 0; i < 16; i++) {
+        //handle sim
+        simxUChar state;
+        simxFloat coord[3];
+        
+        if (simxReadProximitySensor(clientID, sensorHandle[i], & state, coord, NULL, NULL, simx_opmode_buffer) == simx_return_ok) {
+          float dist = coord[2];
+          if (state > 0 && (dist < noDetectionDist)) {
+            if (dist < maxDetectionDist) {
+              dist = maxDetectionDist;
+            }
 
-      rdlen = read(fd, buf, sizeof(buf) - 1);
+            detect[i] = 1 - ((dist - maxDetectionDist) / (noDetectionDist - maxDetectionDist));
+          } else
+            detect[i] = 0;
+        } else
+          detect[i] = 0;
+      }
+      string vRightS,vLeftS, vS;
+      vLeft = v0;
+      vRight = v0;
+
+      for (int i = 0; i < 16; i++) {
+        vLeft = vLeft + braitenbergL[i] * detect[i];
+        vRight = vRight + braitenbergR[i] * detect[i];
+      }
+
+      // atualiza velocidades dos motores
+      vRightS = to_string(vRight);
+      vLeftS = to_string(vLeft);
+      vS = vRightS + "," + vLeftS+"e";
+      write(fd,vS.c_str(),vS.length());
+      canwrite = true;
+
+      cout<<vS<<endl;
+      printf("lê\n");
+      rdlen = read(fd, bufserial, sizeof(bufserial) - 1);
+      printf("leu!!!!!!!!!!\n");
+
       if (rdlen > 0) {
         unsigned char * p;
-        for (p = buf; rdlen-- > 0; p++)
-          if ('0' <= * p && * p <= '9') {
-            for (int i = 0; i < 16; i++) {
-              //handle sim
-              simxUChar state;
-              simxFloat coord[3];
-
-              if (simxReadProximitySensor(clientID, sensorHandle[i], & state, coord, NULL, NULL, simx_opmode_buffer) == simx_return_ok) {
-                float dist = coord[2];
-                if (state > 0 && (dist < noDetectionDist)) {
-                  if (dist < maxDetectionDist) {
-                    dist = maxDetectionDist;
-                  }
-
-                  detect[i] = 1 - ((dist - maxDetectionDist) / (noDetectionDist - maxDetectionDist));
-                } else
-                  detect[i] = 0;
-              } else
-                detect[i] = 0;
-            }
-
-            vLeft = v0;
-            vRight = v0;
-
-            for (int i = 0; i < 16; i++) {
-              vLeft = vLeft + braitenbergL[i] * detect[i];
-              vRight = vRight + braitenbergR[i] * detect[i];
-            }
-
-            // atualiza velocidades dos motores
-            if ( * p == '0') {
-              simxSetJointTargetVelocity(clientID, leftMotorHandle, (simxFloat) vLeft, simx_opmode_streaming);
-              simxSetJointTargetVelocity(clientID, rightMotorHandle, (simxFloat) vRight, simx_opmode_streaming);
-            } else {
-              simxSetJointTargetVelocity(clientID, leftMotorHandle, (simxFloat) 0, simx_opmode_streaming);
-              simxSetJointTargetVelocity(clientID, rightMotorHandle, (simxFloat) 0, simx_opmode_streaming);
-            }
-
+        for (p = bufserial; rdlen-- > 0; p++){
+          printf("%c", *p);
+          if(*p == 'e'){ 
+            printf("\n");  
           }
+        }
+        }
+   
+        
+      
 
-      } else if (rdlen < 0) {
-        printf("Error from read: %d: %s\n", rdlen, strerror(errno));
-      }
+      simxSetJointTargetVelocity(clientID, leftMotorHandle, (simxFloat) vLeft, simx_opmode_streaming);
+      simxSetJointTargetVelocity(clientID, rightMotorHandle, (simxFloat) vRight, simx_opmode_streaming);
+      
 
     }
 
